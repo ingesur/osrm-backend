@@ -84,6 +84,16 @@ template <class EdgeDataT> class SharedDataFacade final : public BaseDataFacade<
     ShM<bool, true>::vector m_edge_is_compressed;
     ShM<unsigned, true>::vector m_geometry_indices;
     ShM<unsigned, true>::vector m_geometry_list;
+    /* RFPV */
+    ShM<NodeID, true>::vector m_node_id_list;                                                     // Original node NodeID -> internal id = i
+    // data_structures/import_edge.hpp --> source, target, name_id,
+    ShM<ImportEdge, true>::vector edge_list;
+    // data_structures/query_node.hpp --> lat, lon, node_id
+    ShM<QueryNode, true>::vector coordinate_list;
+    ShM<TurnRestriction, true>::vector restriction_list;
+    ShM<NodeID, true>::vector bollard_node_list;
+    ShM<NodeID, true>::vector traffic_lights_list;
+    /* */
 
     boost::thread_specific_ptr<std::pair<unsigned, std::shared_ptr<SharedRTree>>> m_static_rtree;
     boost::filesystem::path file_index_path;
@@ -445,6 +455,39 @@ template <class EdgeDataT> class SharedDataFacade final : public BaseDataFacade<
                       m_names_char_list.begin() + range.back() + 1, result.begin());
         }
         return result;
+    }
+
+    // RFPV
+    unsigned get_node_id_for_id(const unsigned id) const override final
+    {
+        SimpleLogger().Write() << "get_node_id_for_id - id: " << id;
+        if ( std::numeric_limits<unsigned>::max() == id ||
+            id >= m_node_id_list.size() )
+        {
+            return std::numeric_limits<unsigned>::max();
+        }
+
+        return m_node_id_list[id];
+    }
+
+    // RFPV
+    unsigned get_id_for_node_id(const unsigned node_id) const override final
+    {
+        if (std::numeric_limits<unsigned>::max() == node_id)
+        {
+            return std::numeric_limits<unsigned>::max();
+        }
+
+        auto it = std::find( m_node_id_list.begin(), m_node_id_list.end(), node_id);
+
+        if (it != m_node_id_list.end()) {
+            auto index = std::distance( m_node_id_list.begin(), it );
+            SimpleLogger().Write() << "id: " << index << " = node_id: " << node_id;
+            return index;
+        } else {
+            SimpleLogger().Write() << "Not found!";
+            return std::numeric_limits<unsigned>::max();
+        }
     }
 
     std::string GetTimestamp() const override final { return m_timestamp; }

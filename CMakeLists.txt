@@ -97,7 +97,7 @@ add_dependencies(FINGERPRINT FingerPrintConfigure)
 add_dependencies(OSRM FingerPrintConfigure)
 set_target_properties(FINGERPRINT PROPERTIES LINKER_LANGUAGE CXX)
 
-add_executable(osrm-routed routed.cpp ${ServerGlob} $<TARGET_OBJECTS:EXCEPTION>)
+add_executable(osrm-routed routed.cpp ${ServerGlob} $<TARGET_OBJECTS:EXCEPTION> $<TARGET_OBJECTS:IMPORT>)
 add_executable(osrm-datastore datastore.cpp $<TARGET_OBJECTS:COORDINATE> $<TARGET_OBJECTS:FINGERPRINT> $<TARGET_OBJECTS:GITDESCRIPTION> $<TARGET_OBJECTS:LOGGER> $<TARGET_OBJECTS:EXCEPTION> $<TARGET_OBJECTS:MERCATOR>)
 
 # Unit tests

@@ -117,6 +117,10 @@ template <class EdgeDataT> class BaseDataFacade
 
     virtual std::string get_name_for_id(const unsigned name_id) const = 0;
 
+    virtual unsigned get_node_id_for_id(const unsigned id) const = 0;
+
+    virtual unsigned get_id_for_node_id(const unsigned node_id) const = 0;
+
     virtual std::string GetTimestamp() const = 0;
 };
 

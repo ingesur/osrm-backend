@@ -33,6 +33,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "datafacade_base.hpp"
 
 #include "../../data_structures/original_edge_data.hpp"
+// RFPV
+#include "../../data_structures/node_based_graph.hpp"
+#include "../../data_structures/import_edge.hpp"
+
 #include "../../data_structures/query_node.hpp"
 #include "../../data_structures/query_edge.hpp"
 #include "../../data_structures/shared_memory_vector_wrapper.hpp"
@@ -73,12 +77,62 @@ template <class EdgeDataT> class InternalDataFacade final : public BaseDataFacad
     ShM<bool, false>::vector m_edge_is_compressed;
     ShM<unsigned, false>::vector m_geometry_indices;
     ShM<unsigned, false>::vector m_geometry_list;
+    /* RFPV */
+    ShM<NodeID, false>::vector m_node_id_list;               // Original node NodeID -> internal id = i
+    ShM<ImportEdge, false>::vector edge_list;                // data_structures/import_edge.hpp --> source, target, name_id,
+    ShM<QueryNode, false>::vector coordinate_list;           // data_structures/query_node.hpp --> lat, lon, node_id
+    ShM<TurnRestriction, false>::vector restriction_list;
+    ShM<NodeID, false>::vector bollard_node_list;
+    ShM<NodeID, false>::vector traffic_lights_list;
+    /* */
 
     boost::thread_specific_ptr<
         StaticRTree<RTreeLeaf, ShM<FixedPointCoordinate, false>::vector, false>> m_static_rtree;
     boost::filesystem::path ram_index_path;
     boost::filesystem::path file_index_path;
     RangeTable<16, false> m_name_table;
+
+    // RFPV
+    void LoadOSRM(const boost::filesystem::path &osrm_path)
+    {
+        if (boost::filesystem::exists(osrm_path))
+        {
+            boost::filesystem::ifstream osrm_stream(osrm_path);
+            SimpleLogger().Write() << "loading osr from " << osrm_path.string();
+            if (!osrm_stream)
+            {
+                SimpleLogger().Write(logWARNING) << osrm_path << " not found";
+            }
+            const NodeID number_of_nodes =
+                readBinaryOSRMGraphFromStream(osrm_stream, edge_list, bollard_node_list,
+                                          traffic_lights_list, &coordinate_list, restriction_list);
+            SimpleLogger().Write() << "loaded " << coordinate_list.size() << " nodes and " << edge_list.size()
+                               << " edges";
+
+            for (const auto &input_edge : edge_list)
+            {
+                /* std::cout << *it; ... */
+                /*
+                input_stream.read(reinterpret_cast<char *>(&source), sizeof(unsigned));
+                input_stream.read(reinterpret_cast<char *>(&target), sizeof(unsigned));
+                input_stream.read(reinterpret_cast<char *>(&length), sizeof(int));
+                input_stream.read(reinterpret_cast<char *>(&dir), sizeof(short));
+                input_stream.read(reinterpret_cast<char *>(&weight), sizeof(int));
+                input_stream.read(reinterpret_cast<char *>(&nameID), sizeof(unsigned));
+                input_stream.read(reinterpret_cast<char *>(&is_roundabout), sizeof(bool));
+                input_stream.read(reinterpret_cast<char *>(&ignore_in_grid), sizeof(bool));
+                input_stream.read(reinterpret_cast<char *>(&is_access_restricted), sizeof(bool));
+                input_stream.read(reinterpret_cast<char *>(&travel_mode), sizeof(TravelMode));
+                input_stream.read(reinterpret_cast<char *>(&is_split), sizeof(bool));
+                */
+                SimpleLogger().Write() << input_edge.source << " | " <<
+                    input_edge.target << " | " << input_edge.name_id << " | " <<
+                    input_edge.weight << " | " <<
+                    input_edge.forward << " | " << input_edge.backward;
+            }
+
+        }
+    }
 
     void LoadTimestamp(const boost::filesystem::path &timestamp_path)
     {
@@ -127,18 +181,24 @@ template <class EdgeDataT> class InternalDataFacade final : public BaseDataFacad
                                     const boost::filesystem::path &edges_file)
     {
         boost::filesystem::ifstream nodes_input_stream(nodes_file, std::ios::binary);
+        SimpleLogger().Write() << "nodes_file: " << nodes_file;
 
         QueryNode current_node;
         unsigned number_of_coordinates = 0;
         nodes_input_stream.read((char *)&number_of_coordinates, sizeof(unsigned));
         m_coordinate_list =
             std::make_shared<std::vector<FixedPointCoordinate>>(number_of_coordinates);
+        // RFPV
+        m_node_id_list.resize(number_of_coordinates);
         for (unsigned i = 0; i < number_of_coordinates; ++i)
         {
             nodes_input_stream.read((char *)&current_node, sizeof(QueryNode));
             m_coordinate_list->at(i) = FixedPointCoordinate(current_node.lat, current_node.lon);
             BOOST_ASSERT((std::abs(m_coordinate_list->at(i).lat) >> 30) == 0);
             BOOST_ASSERT((std::abs(m_coordinate_list->at(i).lon) >> 30) == 0);
+            //RFPV
+            m_node_id_list[i] = current_node.node_id;
+            //SimpleLogger().Write() << current_node.node_id << "|" << current_node.lon << "|" << current_node.lat;
         }
         nodes_input_stream.close();
 
@@ -166,8 +226,20 @@ template <class EdgeDataT> class InternalDataFacade final : public BaseDataFacad
             {
                 ++compressed;
             }
-        }
 
+            //SimpleLogger().Write() <<
+            //    current_edge_data.via_node <<
+            //    " | " <<
+            //    current_edge_data.name_id;
+                //<< " | " <<
+                //current_edge_data.turn_instruction <<
+                //" | " <<
+                //current_edge_data.compressed_geometry <<
+                //" | " <<
+                //current_edge_data.turn_instruction <<
+                //" | " <<
+                //current_edge_data.travel_mode;
+        }
         edges_input_stream.close();
     }
 
@@ -263,6 +335,14 @@ template <class EdgeDataT> class InternalDataFacade final : public BaseDataFacad
         {
             throw osrm::exception("no names file given in ini file");
         }
+        //RFPV
+        /*
+        if (server_paths.find("osrm") == server_paths.end())
+        {
+            throw osrm::exception("no osrm file given in ini file");
+        }
+        */
+
 
         ServerPaths::const_iterator paths_iterator = server_paths.find("hsgrdata");
         BOOST_ASSERT(server_paths.end() != paths_iterator);
@@ -288,6 +368,12 @@ template <class EdgeDataT> class InternalDataFacade final : public BaseDataFacad
         paths_iterator = server_paths.find("geometries");
         BOOST_ASSERT(server_paths.end() != paths_iterator);
         const boost::filesystem::path &geometries_path = paths_iterator->second;
+        // RFPV
+        //paths_iterator = server_paths.find("osrm");
+        //BOOST_ASSERT(server_paths.end() != paths_iterator);
+        //const boost::filesystem::path &osrm_path = paths_iterator->second;
+        const boost::filesystem::path &osrm_path("/home/fpacheco/workspace/idm/osrm-backend/build/uruguay.osrm");
+        //SimpleLogger().Write() << "osrm_path: "  << osrm_path;
 
         // load data
         SimpleLogger().Write() << "loading graph data";
@@ -308,6 +394,10 @@ template <class EdgeDataT> class InternalDataFacade final : public BaseDataFacad
         SimpleLogger().Write() << "loading street names";
         AssertPathExists(names_data_path);
         LoadStreetNames(names_data_path);
+        // RFPV
+        SimpleLogger().Write() << "loading osrm nodes and edges";
+        AssertPathExists(osrm_path);
+        LoadOSRM(osrm_path);
     }
 
     // search graph access
@@ -457,6 +547,64 @@ template <class EdgeDataT> class InternalDataFacade final : public BaseDataFacad
                       m_names_char_list.begin() + range.back() + 1, result.begin());
         }
         return result;
+    }
+
+    // RFPV
+    /** \brief Obtiene el NodeID (OSM) a partir del id interno (OSRM)
+     *
+     * \param id Id interno del nodo
+     * \return NodeID
+     *
+     */
+    unsigned get_node_id_for_id(const unsigned id) const override final
+    {
+        SimpleLogger().Write() << "get_node_id_for_id - id: " << id;
+        /*
+        if ( std::numeric_limits<unsigned>::max() == id ||
+            id >= m_node_id_list.size() )
+        {
+            return std::numeric_limits<unsigned>::max();
+        }
+
+        return m_node_id_list[id];
+        */
+        if ( std::numeric_limits<unsigned>::max() == id ||
+            id >= coordinate_list.size() )
+        {
+            return std::numeric_limits<unsigned>::max();
+        }
+
+        SimpleLogger().Write() << "get_node_id_for_id - m_node_id_list ( id=" << id << " , node_id=" << m_node_id_list[id] << " ) --> ";
+        SimpleLogger().Write() << "get_node_id_for_id - coordinate_list ( id=" << id << " , node_id=" << coordinate_list[id].node_id << " ) --> " << coordinate_list[id];
+        return coordinate_list[id].node_id;
+    }
+
+
+    // RFPV
+    /** \brief Obtiene el id interno (OSRM) a partir del NodeID (OSM)
+     *
+     * \param id Id interno del nodo
+     * \return NodeID
+     *
+     */
+    unsigned get_id_for_node_id(const unsigned node_id) const override final
+    {
+        SimpleLogger().Write() << "get_id_for_node_id - node_id: " << node_id;
+        if (std::numeric_limits<unsigned>::max() == node_id)
+        {
+            return std::numeric_limits<unsigned>::max();
+        }
+
+        auto it = std::find( m_node_id_list.begin(), m_node_id_list.end(), node_id);
+
+        if (it != m_node_id_list.end()) {
+            auto index = std::distance( m_node_id_list.begin(), it );
+            SimpleLogger().Write() << "id: " << index << " = node_id: " << node_id;
+            return index;
+        } else {
+            SimpleLogger().Write() << "Not found!";
+            return std::numeric_limits<unsigned>::max();
+        }
     }
 
     virtual unsigned GetGeometryIndexForEdgeID(const unsigned id) const override final
